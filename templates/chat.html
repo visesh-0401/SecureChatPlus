@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+  <h2>Welcome {{ username }}</h2>
+  <a href="/logout">Logout</a>
+  <ul id="messages"></ul>
+  <input id="msgInput" autocomplete="off"/><button onclick="sendMessage()">Send</button>
+
+  <script>
+    var socket = io();
+    function sendMessage() {
+      let msg = document.getElementById('msgInput').value;
+      socket.send(msg);
+    }
+    socket.on('message', function(msg) {
+      let item = document.createElement("li");
+      item.textContent = msg;
+      document.getElementById("messages").appendChild(item);
+    });
+  </script>
+</body>
+</html>
