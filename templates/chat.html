@@ -11,15 +11,20 @@
 
   <script>
     var socket = io();
+  
+    socket.on('message', function(data) {
+      let obj = JSON.parse(data);
+      console.log("Encrypted message from " + obj.sender + ": ", obj.encrypted);
+      let item = document.createElement("li");
+      item.textContent = `[Encrypted] Message from ${obj.sender}`;
+      document.getElementById("messages").appendChild(item);
+    });
+  
     function sendMessage() {
       let msg = document.getElementById('msgInput').value;
       socket.send(msg);
     }
-    socket.on('message', function(msg) {
-      let item = document.createElement("li");
-      item.textContent = msg;
-      document.getElementById("messages").appendChild(item);
-    });
   </script>
+  
 </body>
 </html>
