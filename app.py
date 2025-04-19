@@ -1,103 +1,78 @@
-from flask import Flask, render_template, request, redirect, session
-from flask_socketio import SocketIO, send
-import bcrypt
-import os
-import json
-
-from utils.crypto_utils import (
-    generate_rsa_keypair,
-    encrypt_aes_key_with_rsa,
-    aes_encrypt
-)
+from flask import Flask, render_template, request, redirect, session, url_for
+from flask_socketio import SocketIO, emit
+from flask_bcrypt import Bcrypt
+from models import db, User, Message
+from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.config['SECRET_KEY'] = 'secret!'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite3'
+db.init_app(app)
+bcrypt = Bcrypt(app)
 socketio = SocketIO(app)
 
-# In-memory databases
-users = {}               # username -> hashed password
-session_keys = {}        # username -> AES key
-chat_log = []            # stores encrypted messages
-
-# RSA Keys for the server (2048-bit)
-PRIVATE_KEY, PUBLIC_KEY = generate_rsa_keypair()
-
+with app.app_context():
+    db.create_all()
 
 @app.route('/')
 def home():
     if 'username' in session:
-        return render_template('chat.html', username=session['username'])
+        return redirect('/chat')
     return redirect('/login')
 
+@app.route('/chat')
+def chat():
+    if 'username' not in session:
+        return redirect('/login')
+    return render_template('index.html', username=session['username'])
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         username = request.form['username']
-        password = request.form['password'].encode('utf-8')
-
-        if username in users:
+        password = bcrypt.generate_password_hash(request.form['password']).decode('utf-8')
+        if User.query.filter_by(username=username).first():
             return "User already exists"
-
-        hashed = bcrypt.hashpw(password, bcrypt.gensalt())
-        users[username] = hashed
+        db.session.add(User(username=username, password=password))
+        db.session.commit()
         return redirect('/login')
     return render_template('register.html')
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password'].encode('utf-8')
-        stored = users.get(username)
-
-        if stored and bcrypt.checkpw(password, stored):
-            session['username'] = username
-            return redirect('/')
+        user = User.query.filter_by(username=request.form['username']).first()
+        if user and bcrypt.check_password_hash(user.password, request.form['password']):
+            session['username'] = user.username
+            return redirect('/chat')
         return "Invalid credentials"
     return render_template('login.html')
 
-
 @app.route('/logout')
 def logout():
-    session.clear()
+    session.pop('username', None)
     return redirect('/login')
-
-
-# Assign AES key to user on WebSocket connect
-@socketio.on('connect')
-def on_connect():
-    username = session.get('username')
-    if username:
-        from Crypto.Random import get_random_bytes
-        aes_key = get_random_bytes(16)
-        session_keys[username] = aes_key
-        encrypted_key = encrypt_aes_key_with_rsa(PUBLIC_KEY, aes_key)
-        print(f"[SecureChat+] AES key for {username} encrypted with RSA and ready for use.")
-        # In production: send encrypted key to the client via a secure method
-
 
 @socketio.on('message')
 def handle_message(msg):
-    sender = session.get('username')
-    aes_key = session_keys.get(sender)
+    timestamp = datetime.now().strftime('%H:%M:%S')
+    user = session.get('username', 'Anonymous')
 
-    if not aes_key:
-        send("[Encryption error: No AES key assigned]", broadcast=False)
-        return
+    # Save message to database
+    new_msg = Message(sender=user, content=msg, timestamp=timestamp)
+    db.session.add(new_msg)
+    db.session.commit()
 
-    encrypted = aes_encrypt(aes_key, msg)
-    chat_log.append({
-        'sender': sender,
-        'encrypted': encrypted
-    })
+    # Broadcast message
+    formatted = f"[{timestamp}] {user}: {msg}"
+    emit('message', formatted, broadcast=True)
 
-    send(json.dumps({
-        'sender': sender,
-        'encrypted': encrypted
-    }), broadcast=True)
-
+@app.route('/messages')
+def get_messages():
+    messages = Message.query.order_by(Message.id).all()
+    return {
+        "messages": [f"[{m.timestamp}] {m.sender}: {m.content}" for m in messages]
+    }
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)

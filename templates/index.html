@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SecureChat+ (Basic)</title>
+</head>
+<body>
+    <h2>Welcome, {{ username }}</h2>
+    <ul id="messages"></ul>
+    <input id="myMessage" autocomplete="off" /><button onclick="sendMessage()">Send</button>
+    
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        var socket = io();
+    
+        // Load message history on page load
+        fetch('/messages')
+          .then(res => res.json())
+          .then(data => {
+              data.messages.forEach(msg => {
+                  const item = document.createElement('li');
+                  item.textContent = msg;
+                  document.getElementById('messages').appendChild(item);
+              });
+          });
+    
+        socket.on('message', function(msg) {
+            const item = document.createElement('li');
+            item.textContent = msg;
+            document.getElementById('messages').appendChild(item);
+        });
+    
+        function sendMessage() {
+            const msg = document.getElementById('myMessage').value;
+            socket.send(msg);
+            document.getElementById('myMessage').value = '';
+        }
+    </script>
+    
+    
+</body>
+</html>
